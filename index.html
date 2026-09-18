@@ -135,12 +135,31 @@
             }
         }
 
+
         // 3. Запуск режима готовки при клике на кнопку
         function startCooking() {
-            document.getElementById('start-btn').style.display = 'none';
-            keepScreenAlive();
-            showStep();
-            startListening();
+            // Принудительно запрашиваем доступ к микрофону через MediaDevices (для WebView Telegram)
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                navigator.mediaDevices.getUserMedia({ audio: true })
+                    .then(function(stream) {
+                        console.log("Доступ к микрофону получен успешно!");
+                        // Если доступ дали — скрываем кнопку и запускаем логику
+                        document.getElementById('start-btn').style.display = 'none';
+                        keepScreenAlive();
+                        showStep();
+                        startListening();
+                    })
+                    .catch(function(err) {
+                        alert("Пожалуйста, разрешите доступ к микрофону в настройках Telegram, чтобы управлять голосом.");
+                        console.log("Ошибка доступа к микрофону:", err);
+                    });
+            } else {
+                // Запасной вариант, если первый метод не поддерживается устройством
+                document.getElementById('start-btn').style.display = 'none';
+                keepScreenAlive();
+                showStep();
+                startListening();
+            }
         }
 
         // Отображение и запуск озвучки текущего шага
