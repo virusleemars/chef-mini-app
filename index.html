@@ -97,34 +97,6 @@
         }
     }
 
-    // 3. Главный запуск с нативным запросом прав Telegram для Android
-    function initMicrophone() {
-        document.getElementById('status-info').innerText = "Запрашиваю доступ у Telegram...";
-
-        // Используем официальный метод Telegram для получения доступа к микрофону
-        if (tg.requestMicrophoneAccess) {
-            tg.requestMicrophoneAccess((granted) => {
-                if (granted) {
-                    proceedToCooking();
-                } else {
-                    alert("Вы отклонили доступ к микрофону в Telegram. Голосовое управление недоступно.");
-                    document.getElementById('status-info').innerText = "Доступ отклонен покупателем.";
-                }
-            });
-        } else {
-            // Запасной веб-метод, если версия Telegram старая
-            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                navigator.mediaDevices.getUserMedia({ audio: true })
-                    .then(() => proceedToCooking())
-                    .catch(() => {
-                        alert("Не удалось получить доступ к микрофону устройства.");
-                    });
-            } else {
-                proceedToCooking();
-            }
-        }
-    }
-
     function proceedToCooking() {
         document.getElementById('start-btn').style.display = 'none';
         keepScreenAlive();
@@ -211,11 +183,11 @@ async function requestMicrophone() {
             if (granted) {
                 proceedToCooking();
             } else {
-                handleAccessDenied();
+                handleAccessDenied('Ошибка 1');
             }
         } catch (e) {
             console.warn('Ошибка запроса микрофона:', e);
-            handleAccessDenied();
+            handleAccessDenied('Ошибка 2');
         }
         return;
     }
@@ -226,19 +198,19 @@ async function requestMicrophone() {
             await navigator.mediaDevices.getUserMedia({ audio: true });
             proceedToCooking();
         } catch (e) {
-            handleAccessDenied();
+            handleAccessDenied('Ошибка 3');
         }
         return;
     }
     
-    handleAccessDenied();
+    handleAccessDenied('Ошибка 4');
 }
     
-    function handleAccessDenied() {
+    function handleAccessDenied(text) {
       alert('Вы отклонили доступ к микрофону в Telegram. Голосовое управление недоступно.');
       const el = document.getElementById('status-info');
       if (el) {
-        el.innerText = 'Доступ отклонён покупателем.';
+        el.innerText = text;
       }
     }
     </script>
