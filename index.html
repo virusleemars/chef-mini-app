@@ -56,134 +56,151 @@
     </div>
 
     <script>
-        // Инициализируем Telegram Web App
-        const tg = window.Telegram.WebApp;
-        tg.ready();
-        tg.expand();
+    // Инициализируем Telegram Web App
+    const tg = window.Telegram.WebApp;
+    tg.ready();
+    tg.expand(); // Разворачиваем на весь экран смартфона
 
-        const steps = [
-            "Шаг 1. Нарежьте куриное филе крупными кубиками.",
-            "Шаг 2. Разогрейте сковороду с маслом и обжаривайте курицу 5 минут.",
-            "Шаг 3. Добавьте две чайные ложки специи карри и залейте сливками.",
-            "Шаг 4. Тушите на медленном огне еще 10 минут. Блюдо готово!"
-        ];
+    const steps = [
+        "Шаг 1. Нарежьте куриное филе крупными кубиками.",
+        "Шаг 2. Разогрейте сковороду с маслом и обжаривайте курицу 5 минут.",
+        "Шаг 3. Добавьте две чайные ложки специи карри и залейте сливками.",
+        "Шаг 4. Тушите на медленном огне еще 10 минут. Блюдо готово!"
+    ];
+    
+    let currentStep = 0;
+    let wakeLock = null;
+    let recognition = null;
+    let isListening = false;
+
+    // 1. Функция озвучки текста (Text-to-Speech)
+    function speak(text) {
+        window.speechSynthesis.cancel(); 
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'ru-RU';
         
-        let currentStep = 0;
-        let wakeLock = null;
-        let recognition = null;
-        let isListening = false;
+        // Отключаем микрофон, пока бот говорит, чтобы он сам себя не услышал
+        if (recognition && isListening) { recognition.stop(); }
+        
+        utterance.onend = function() {
+            if (recognition && !isListening && currentStep < steps.length) { 
+                try { recognition.start(); } catch(e) {}
+            }
+        };
+        window.speechSynthesis.speak(utterance);
+    }
 
-        // 1. Принудительный запрос прав через интерфейсы Telegram WebView
-        function initMicrophone() {
-            document.getElementById('status-info').innerText = "Запрашиваю доступ...";
-            
-            // Проверяем нативный метод запроса прав, если он доступен в текущей версии SDK
-            if (tg.version && parseFloat(tg.version) >= 6.0 && navigator.mediaDevices) {
+    // 2. Удержание экрана от затухания
+    async function keepScreenAlive() {
+        if ('wakeLock' in navigator) {
+            try { wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {}
+        }
+    }
+
+    // 3. Главный запуск с нативным запросом прав Telegram для Android
+    function initMicrophone() {
+        document.getElementById('status-info').innerText = "Запрашиваю доступ у Telegram...";
+
+        // Используем официальный метод Telegram для получения доступа к микрофону
+        if (tg.requestMicrophoneAccess) {
+            tg.requestMicrophoneAccess((granted) => {
+                if (granted) {
+                    proceedToCooking();
+                } else {
+                    alert("Вы отклонили доступ к микрофону в Telegram. Голосовое управление недоступно.");
+                    document.getElementById('status-info').innerText = "Доступ отклонен покупателем.";
+                }
+            });
+        } else {
+            // Запасной веб-метод, если версия Telegram старая
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
                 navigator.mediaDevices.getUserMedia({ audio: true })
-                    .then(function(stream) {
-                        // Успешно получили поток, останавливаем его, чтобы просто зафиксировать право
-                        stream.getTracks().forEach(track => track.stop());
-                        proceedToCooking();
-                    })
-                    .catch(function(err) {
-                        alert("Доступ заблокирован Telegram WebView. Попробуйте нажать кнопку еще раз или проверьте настройки приватности смартфона.");
-                        document.getElementById('status-info').innerText = "Ошибка доступа к микрофону.";
+                    .then(() => proceedToCooking())
+                    .catch(() => {
+                        alert("Не удалось получить доступ к микрофону устройства.");
                     });
             } else {
                 proceedToCooking();
             }
         }
+    }
 
-        function proceedToCooking() {
-            document.getElementById('start-btn').style.display = 'none';
-            keepScreenAlive();
-            showStep();
-            startListening();
+    function proceedToCooking() {
+        document.getElementById('start-btn').style.display = 'none';
+        keepScreenAlive();
+        showStep();
+        startListening();
+    }
+
+    function showStep() {
+        if (currentStep >= 0 && currentStep < steps.length) {
+            document.getElementById('step-text').innerText = steps[currentStep];
+            speak(steps[currentStep]);
+        } else if (currentStep >= steps.length) {
+            document.getElementById('step-text').innerText = "🎉 Приятного аппетита! Готовка завершена.";
+            speak("Приятного аппетита! Готовка завершена.");
+            document.getElementById('status-info').innerText = "Рецепт окончен.";
+            if (wakeLock) wakeLock.release();
+        }
+    }
+
+    // 4. Логика постоянного распознавания речи
+    function startListening() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            document.getElementById('status-info').innerText = "Голосовой ввод не поддерживается браузером Android.";
+            return;
         }
 
-        function speak(text) {
-            window.speechSynthesis.cancel();
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.lang = 'ru-RU';
-            
-            if (recognition && isListening) { recognition.stop(); }
-            utterance.onend = function() {
-                if (recognition && !isListening && currentStep < steps.length) { recognition.start(); }
-            };
-            window.speechSynthesis.speak(utterance);
-        }
+        recognition = new SpeechRecognition();
+        recognition.lang = 'ru-RU';
+        recognition.continuous = false;
+        recognition.interimResults = false;
 
-        async function keepScreenAlive() {
-            if ('wakeLock' in navigator) {
-                try { wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {}
+        recognition.onstart = function() {
+            isListening = true;
+            document.getElementById('status-info').innerText = "🎤 Слушаю команды...";
+        };
+
+        recognition.onend = function() {
+            isListening = false;
+            // Перезапуск микрофона
+            if (currentStep < steps.length && !window.speechSynthesis.speaking) {
+                try { recognition.start(); } catch(e) {}
             }
-        }
+        };
 
-        function showStep() {
-            if (currentStep >= 0 && currentStep < steps.length) {
-                document.getElementById('step-text').innerText = steps[currentStep];
-                speak(steps[currentStep]);
-            } else if (currentStep >= steps.length) {
-                document.getElementById('step-text').innerText = "🎉 Приятного аппетита!";
-                speak("Приятного аппетита! Готовка завершена.");
-                document.getElementById('status-info').innerText = "Готовка завершена.";
-                if (wakeLock) wakeLock.release();
-            }
-        }
+        recognition.onresult = function(event) {
+            const current = event.resultIndex;
+            const text = event.results[current][0].transcript.toLowerCase();
+            document.getElementById('status-info').innerText = "Услышал: " + text;
 
-        function startListening() {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SpeechRecognition) {
-                document.getElementById('status-info').innerText = "Голосовое распознавание не поддерживается на этом устройстве.";
-                return;
-            }
-
-            recognition = new SpeechRecognition();
-            recognition.lang = 'ru-RU';
-            recognition.continuous = false;
-            recognition.interimResults = false;
-
-            recognition.onstart = function() {
-                isListening = true;
-                document.getElementById('status-info').innerText = "🎤 Слушаю команды...";
-            };
-
-            recognition.onend = function() {
-                isListening = false;
-                if (currentStep < steps.length && !window.speechSynthesis.speaking) {
-                    try { recognition.start(); } catch(e) {}
-                }
-            };
-
-            recognition.onresult = function(event) {
-                const text = event.results[0][0].transcript.toLowerCase();
-                document.getElementById('status-info').innerText = "Услышал: " + text;
-
-                if (text.includes("дальше") || text.includes("следующий") || text.includes("вперед")) {
-                    currentStep++;
-                    if(tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
+            if (text.includes("дальше") || text.includes("следующий") || text.includes("вперед")) {
+                currentStep++;
+                if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
+                showStep();
+            } 
+            else if (text.includes("назад") || text.includes("прошлый") || text.includes("предыдущий")) {
+                if (currentStep > 0) {
+                    currentStep--;
+                    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
                     showStep();
-                } 
-                else if (text.includes("назад") || text.includes("прошлый") || text.includes("предыдущий")) {
-                    if (currentStep > 0) {
-                        currentStep--;
-                        if(tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
-                        showStep();
-                    } else {
-                        speak("Это самый первый шаг.");
-                    }
-                } 
-                else if (text.includes("повтори") || text.includes("еще раз") || text.includes("скажи снова")) {
-                    if(tg.HapticFeedback) tg.HapticFeedback.impactOccurred("medium");
-                    showStep();
+                } else {
+                    speak("Это самый первый шаг.");
                 }
-            };
+            } 
+            else if (text.includes("повтори") || text.includes("еще раз") || text.includes("скажи снова")) {
+                if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred("medium");
+                showStep();
+            }
+        };
 
-            recognition.onerror = function(event) {
-                console.log("Ошибка распознавания:", event.error);
-                document.getElementById('status-info').innerText = "Ошибка микрофона: " + event.error;
-            };
-        }
+        recognition.onerror = function(event) {
+            console.log("Ошибка микрофона:", event.error);
+        };
+
+        try { recognition.start(); } catch(e) {}
+    }
     </script>
 </body>
 </html>
