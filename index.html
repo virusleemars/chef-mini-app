@@ -178,6 +178,7 @@ async function requestMicrophone() {
     // Актуальный метод Telegram WebApp API (Bot API 8.0+)
     if (typeof tg?.requestMicrophoneAccess === 'function') {
         try {
+            alert('TYTA');
             // В новых версиях возвращает Promise<boolean>
             const granted = await tg.requestMicrophoneAccess();
             if (granted) {
