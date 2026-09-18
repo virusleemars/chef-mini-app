@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Голосовой Шеф-Повар MVP</title>
+    <!-- Подключаем Telegram Web Apps SDK -->
+    <script src="https://telegram.org"></script>
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+            text-align: center; 
+            padding: 20px; 
+            background: #f4f4f7; 
+            color: #000;
+        }
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        .step-box { 
+            background: white; 
+            padding: 30px; 
+            border-radius: 20px; 
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05); 
+            margin: 30px 0; 
+            min-height: 120px; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            font-size: 24px; 
+            font-weight: 600; 
+            line-height: 1.4;
+        }
+        .status {
+            font-size: 14px;
+            color: #777;
+            margin-bottom: 20px;
+        }
+        button { 
+            background: #248bca; 
+            color: white; 
+            border: none; 
+            padding: 18px 36px; 
+            font-size: 18px; 
+            border-radius: 15px; 
+            cursor: pointer; 
+            font-weight: bold;
+            box-shadow: 0 4px 10px rgba(36,139,202,0.3);
+        }
+        button:active {
+            transform: scale(0.98);
+        }
+        .commands-list {
+            margin-top: 40px;
+            text-align: left;
+            background: #eef2f5;
+            padding: 15px;
+            border-radius: 12px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>Рецепт: Курица карри</h2>
+        <div class="status" id="status-info">Экран активен. Нажмите кнопку для старта.</div>
+        
+        <div class="step-box" id="step-text">
+            Нажмите кнопку ниже, чтобы начать готовку hands-free
+        </div>
+        
+        <button id="start-btn" onclick="startCooking()">Начать готовку</button>
+
+        <div class="commands-list">
+            <strong>🗣 Команды для управления голосом:</strong>
+            <ul>
+                <li>«Дальше» / «Следующий» — перейти вперед</li>
+                <li>«Назад» / «Прошлый» — вернуться назад</li>
+                <li>«Повтори» / «Еще раз» — прослушать шаг снова</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Инициализируем Telegram Web App
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand(); // Разворачиваем на весь экран смартфона
+
+        // Тестовый рецепт, зашитый в код приложения
+        const steps = [
+            "Шаг 1. Нарежьте куриное филе крупными кубиками.",
+            "Шаг 2. Разогрейте сковороду с маслом и обжаривайте курицу 5 минут.",
+            "Шаг 3. Добавьте две чайные ложки специи карри и залейте сливками.",
+            "Шаг 4. Тушите на медленном огне еще 10 минут. Блюдо готово!"
+        ];
+        
+        let currentStep = 0;
+        let wakeLock = null;
+        let recognition = null;
+        let isListening = false;
+
+        // 1. Функция озвучки текста (Text-to-Speech)
+        function speak(text) {
+            window.speechSynthesis.cancel(); // Останавливаем прошлую речь, если она идет
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'ru-RU';
+            
+            // На время озвучки отключаем микрофон, чтобы бот не услышал сам себя
+            if (recognition && isListening) {
+                recognition.stop();
+            }
+            
+            utterance.onend = function() {
+                // Как только бот договорил — снова включаем микрофон
+                if (recognition && !isListening && currentStep < steps.length) {
+                    recognition.start();
+                }
+            };
+            
+            window.speechSynthesis.speak(utterance);
+        }
+
+        // 2. Функция удержания экрана (Запрет на затухание)
+        async function keepScreenAlive() {
+            if ('wakeLock' in navigator) {
+                try {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    document.getElementById('status-info').innerText = "🔊 Слушаю ваши команды...";
+                } catch (err) { 
+                    console.log("WakeLock error:", err); 
+                }
+            }
+        }
+
+        // 3. Запуск режима готовки при клике на кнопку
+        function startCooking() {
+            document.getElementById('start-btn').style.display = 'none';
+            keepScreenAlive();
+            showStep();
+            startListening();
+        }
+
+        // Отображение и запуск озвучки текущего шага
+        function showStep() {
+            if (currentStep >= 0 && currentStep < steps.length) {
+                document.getElementById('step-text').innerText = steps[currentStep];
+                speak(steps[currentStep]);
+            } else if (currentStep >= steps.length) {
+                document.getElementById('step-text').innerText = "🎉 Приятного аппетита! Готóвка завершена.";
+                speak("Приятного аппетита! Готовка завершена.");
+                document.getElementById('status-info').innerText = "Рецепт окончен.";
+                if (wakeLock) wakeLock.release();
+            }
+        }
+
+        // 4. Логика постоянного распознавания речи (Hands-Free)
+        function startListening() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                alert("Ваш браузер или телефон не поддерживает распознавание речи.");
+                return;
+            }
+
+            recognition = new SpeechRecognition();
+            recognition.lang = 'ru-RU';
+            recognition.continuous = false; // Перезапускаем по окончании фразы для точности
+            recognition.interimResults = false;
+
+            recognition.onstart = function() {
+                isListening = true;
+                document.getElementById('status-info').innerText = "🎤 Говорите (Слушаю)...";
+            };
+
+            recognition.onend = function() {
+                isListening = false;
+                // Автоматически перезапускаем микрофон, если рецепт не закончился
+                if (currentStep < steps.length && !window.speechSynthesis.speaking) {
+                    recognition.start();
+                }
+            };
+
+            recognition.onresult = function(event) {
+                const text = event.results[0][0].transcript.toLowerCase();
+                console.log("ИИ услышал фразу:", text);
+
+                // Обработка команды "ДАЛЬШЕ"
+                if (text.includes("дальше") || text.includes("следующий") || text.includes("вперед")) {
+                    currentStep++;
+                    tg.HapticFeedback.notificationOccurred("success"); // Легкая вибрация телефона
+                    showStep();
+                } 
+                // Обработка команды "НАЗАД"
+                else if (text.includes("назад") || text.includes("прошлый") || text.includes("предыдущий")) {
+                    if (currentStep > 0) {
+                        currentStep--;
+                        tg.HapticFeedback.notificationOccurred("success");
+                        showStep();
+                    } else {
+                        speak("Это самый первый шаг.");
+                    }
+                } 
+                // Обработка команды "ПОВТОРИ"
+                else if (text.includes("повтори") || text.includes("еще раз") || text.includes("скажи снова")) {
+                    tg.HapticFeedback.impactOccurred("medium");
+                    showStep(); // Просто перезапускает текущий шаг
+                }
+            };
+
+            recognition.onerror = function(event) {
+                console.log("Ошибка распознавания:", event.error);
+            };
+        }
+    </script>
+</body>
+</html>
