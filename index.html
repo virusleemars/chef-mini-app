@@ -14,50 +14,22 @@
             background: #f4f4f7; 
             color: #000;
         }
-        .container {
-            max-width: 500px;
-            margin: 0 auto;
-        }
+        .container { max-width: 500px; margin: 0 auto; }
         .step-box { 
-            background: white; 
-            padding: 30px; 
-            border-radius: 20px; 
-            box-shadow: 0 4px 15px rgba(0,0,0,0.05); 
-            margin: 30px 0; 
-            min-height: 120px; 
-            display: flex; 
-            align-items: center; 
-            justify-content: center; 
-            font-size: 24px; 
-            font-weight: 600; 
-            line-height: 1.4;
+            background: white; padding: 30px; border-radius: 20px; 
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin: 30px 0; 
+            min-height: 120px; display: flex; align-items: center; justify-content: center; 
+            font-size: 24px; font-weight: 600; line-height: 1.4;
         }
-        .status {
-            font-size: 14px;
-            color: #777;
-            margin-bottom: 20px;
-        }
+        .status { font-size: 14px; color: #777; margin-bottom: 20px; }
         button { 
-            background: #248bca; 
-            color: white; 
-            border: none; 
-            padding: 18px 36px; 
-            font-size: 18px; 
-            border-radius: 15px; 
-            cursor: pointer; 
-            font-weight: bold;
+            background: #248bca; color: white; border: none; padding: 18px 36px; 
+            font-size: 18px; border-radius: 15px; cursor: pointer; font-weight: bold;
             box-shadow: 0 4px 10px rgba(36,139,202,0.3);
         }
-        button:active {
-            transform: scale(0.98);
-        }
+        button:active { transform: scale(0.98); }
         .commands-list {
-            margin-top: 40px;
-            text-align: left;
-            background: #eef2f5;
-            padding: 15px;
-            border-radius: 12px;
-            font-size: 14px;
+            margin-top: 40px; text-align: left; background: #eef2f5; padding: 15px; border-radius: 12px; font-size: 14px;
         }
     </style>
 </head>
@@ -65,13 +37,13 @@
 
     <div class="container">
         <h2>Рецепт: Курица карри</h2>
-        <div class="status" id="status-info">Экран активен. Нажмите кнопку для старта.</div>
+        <div class="status" id="status-info">Требуется активация микрофона. Нажмите кнопку.</div>
         
         <div class="step-box" id="step-text">
-            Нажмите кнопку ниже, чтобы начать готовку hands-free
+            Нажмите кнопку ниже, чтобы запросить доступ к микрофону Telegram
         </div>
         
-        <button id="start-btn" onclick="startCooking()">Начать готовку</button>
+        <button id="start-btn" onclick="initMicrophone()">Начать готовку</button>
 
         <div class="commands-list">
             <strong>🗣 Команды для управления голосом:</strong>
@@ -87,9 +59,8 @@
         // Инициализируем Telegram Web App
         const tg = window.Telegram.WebApp;
         tg.ready();
-        tg.expand(); // Разворачиваем на весь экран смартфона
+        tg.expand();
 
-        // Тестовый рецепт, зашитый в код приложения
         const steps = [
             "Шаг 1. Нарежьте куриное филе крупными кубиками.",
             "Шаг 2. Разогрейте сковороду с маслом и обжаривайте курицу 5 минут.",
@@ -102,134 +73,115 @@
         let recognition = null;
         let isListening = false;
 
-        // 1. Функция озвучки текста (Text-to-Speech)
+        // 1. Принудительный запрос прав через интерфейсы Telegram WebView
+        function initMicrophone() {
+            document.getElementById('status-info').innerText = "Запрашиваю доступ...";
+            
+            // Проверяем нативный метод запроса прав, если он доступен в текущей версии SDK
+            if (tg.version && parseFloat(tg.version) >= 6.0 && navigator.mediaDevices) {
+                navigator.mediaDevices.getUserMedia({ audio: true })
+                    .then(function(stream) {
+                        // Успешно получили поток, останавливаем его, чтобы просто зафиксировать право
+                        stream.getTracks().forEach(track => track.stop());
+                        proceedToCooking();
+                    })
+                    .catch(function(err) {
+                        alert("Доступ заблокирован Telegram WebView. Попробуйте нажать кнопку еще раз или проверьте настройки приватности смартфона.");
+                        document.getElementById('status-info').innerText = "Ошибка доступа к микрофону.";
+                    });
+            } else {
+                proceedToCooking();
+            }
+        }
+
+        function proceedToCooking() {
+            document.getElementById('start-btn').style.display = 'none';
+            keepScreenAlive();
+            showStep();
+            startListening();
+        }
+
         function speak(text) {
-            window.speechSynthesis.cancel(); // Останавливаем прошлую речь, если она идет
+            window.speechSynthesis.cancel();
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.lang = 'ru-RU';
             
-            // На время озвучки отключаем микрофон, чтобы бот не услышал сам себя
-            if (recognition && isListening) {
-                recognition.stop();
-            }
-            
+            if (recognition && isListening) { recognition.stop(); }
             utterance.onend = function() {
-                // Как только бот договорил — снова включаем микрофон
-                if (recognition && !isListening && currentStep < steps.length) {
-                    recognition.start();
-                }
+                if (recognition && !isListening && currentStep < steps.length) { recognition.start(); }
             };
-            
             window.speechSynthesis.speak(utterance);
         }
 
-        // 2. Функция удержания экрана (Запрет на затухание)
         async function keepScreenAlive() {
             if ('wakeLock' in navigator) {
-                try {
-                    wakeLock = await navigator.wakeLock.request('screen');
-                    document.getElementById('status-info').innerText = "🔊 Слушаю ваши команды...";
-                } catch (err) { 
-                    console.log("WakeLock error:", err); 
-                }
+                try { wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {}
             }
         }
 
-
-        // 3. Запуск режима готовки при клике на кнопку
-        function startCooking() {
-            // Принудительно запрашиваем доступ к микрофону через MediaDevices (для WebView Telegram)
-            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                navigator.mediaDevices.getUserMedia({ audio: true })
-                    .then(function(stream) {
-                        console.log("Доступ к микрофону получен успешно!");
-                        // Если доступ дали — скрываем кнопку и запускаем логику
-                        document.getElementById('start-btn').style.display = 'none';
-                        keepScreenAlive();
-                        showStep();
-                        startListening();
-                    })
-                    .catch(function(err) {
-                        alert("Пожалуйста, разрешите доступ к микрофону в настройках Telegram, чтобы управлять голосом.");
-                        console.log("Ошибка доступа к микрофону:", err);
-                    });
-            } else {
-                // Запасной вариант, если первый метод не поддерживается устройством
-                document.getElementById('start-btn').style.display = 'none';
-                keepScreenAlive();
-                showStep();
-                startListening();
-            }
-        }
-
-        // Отображение и запуск озвучки текущего шага
         function showStep() {
             if (currentStep >= 0 && currentStep < steps.length) {
                 document.getElementById('step-text').innerText = steps[currentStep];
                 speak(steps[currentStep]);
             } else if (currentStep >= steps.length) {
-                document.getElementById('step-text').innerText = "🎉 Приятного аппетита! Готóвка завершена.";
+                document.getElementById('step-text').innerText = "🎉 Приятного аппетита!";
                 speak("Приятного аппетита! Готовка завершена.");
-                document.getElementById('status-info').innerText = "Рецепт окончен.";
+                document.getElementById('status-info').innerText = "Готовка завершена.";
                 if (wakeLock) wakeLock.release();
             }
         }
 
-        // 4. Логика постоянного распознавания речи (Hands-Free)
         function startListening() {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) {
-                alert("Ваш браузер или телефон не поддерживает распознавание речи.");
+                document.getElementById('status-info').innerText = "Голосовое распознавание не поддерживается на этом устройстве.";
                 return;
             }
 
             recognition = new SpeechRecognition();
             recognition.lang = 'ru-RU';
-            recognition.continuous = false; // Перезапускаем по окончании фразы для точности
+            recognition.continuous = false;
             recognition.interimResults = false;
 
             recognition.onstart = function() {
                 isListening = true;
-                document.getElementById('status-info').innerText = "🎤 Говорите (Слушаю)...";
+                document.getElementById('status-info').innerText = "🎤 Слушаю команды...";
             };
 
             recognition.onend = function() {
                 isListening = false;
-                // Автоматически перезапускаем микрофон, если рецепт не закончился
                 if (currentStep < steps.length && !window.speechSynthesis.speaking) {
-                    recognition.start();
+                    try { recognition.start(); } catch(e) {}
                 }
             };
 
             recognition.onresult = function(event) {
                 const text = event.results[0][0].transcript.toLowerCase();
-                console.log("ИИ услышал фразу:", text);
+                document.getElementById('status-info').innerText = "Услышал: " + text;
 
-                // Обработка команды "ДАЛЬШЕ"
                 if (text.includes("дальше") || text.includes("следующий") || text.includes("вперед")) {
                     currentStep++;
-                    tg.HapticFeedback.notificationOccurred("success"); // Легкая вибрация телефона
+                    if(tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
                     showStep();
                 } 
-                // Обработка команды "НАЗАД"
                 else if (text.includes("назад") || text.includes("прошлый") || text.includes("предыдущий")) {
                     if (currentStep > 0) {
                         currentStep--;
-                        tg.HapticFeedback.notificationOccurred("success");
+                        if(tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
                         showStep();
                     } else {
                         speak("Это самый первый шаг.");
                     }
                 } 
-                // Обработка команды "ПОВТОРИ"
                 else if (text.includes("повтори") || text.includes("еще раз") || text.includes("скажи снова")) {
-                    tg.HapticFeedback.impactOccurred("medium");
-                    showStep(); // Просто перезапускает текущий шаг
+                    if(tg.HapticFeedback) tg.HapticFeedback.impactOccurred("medium");
+                    showStep();
                 }
             };
 
             recognition.onerror = function(event) {
                 console.log("Ошибка распознавания:", event.error);
+                document.getElementById('status-info').innerText = "Ошибка микрофона: " + event.error;
             };
         }
     </script>
