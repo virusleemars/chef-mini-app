@@ -43,7 +43,7 @@
             Нажмите кнопку ниже, чтобы запросить доступ к микрофону Telegram
         </div>
         
-        <button id="start-btn" onclick="initMicrophone()">Начать готовку</button>
+        <button id="start-btn" onclick="requestMicrophone()">Начать готовку</button>
 
         <div class="commands-list">
             <strong>🗣 Команды для управления голосом:</strong>
@@ -200,6 +200,46 @@
         };
 
         try { recognition.start(); } catch(e) {}
+    }
+    async function requestMicrophone() {
+      // Сначала пробуем Telegram WebApp API
+      if (typeof tg?.requestAccessMicrophone === 'function') {
+        try {
+          const stream = await tg.requestAccessMicrophone();
+          // stream — это MediaStream, можно использовать дальше
+          console.log('Микрофон разрешён', stream);
+          proceedToCooking();
+        } catch (e) {
+          console.warn('Доступ к микрофону отклонён или ошибка', e);
+          handleAccessDenied();
+        }
+        return;
+      }
+    
+      // Fallback: только если TWA API недоступен (очень старые клиенты)
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        try {
+          await navigator.mediaDevices.getUserMedia({ audio: true });
+          console.log('Микрофон разрешён через getUserMedia');
+          proceedToCooking();
+        } catch (e) {
+          console.warn('Не удалось получить доступ к микрофону', e);
+          handleAccessDenied();
+        }
+        return;
+      }
+    
+      // Если вообще ничего нет — запасной путь
+      console.warn('Нет доступа к микрофону');
+      handleAccessDenied();
+    }
+    
+    function handleAccessDenied() {
+      alert('Вы отклонили доступ к микрофону в Telegram. Голосовое управление недоступно.');
+      const el = document.getElementById('status-info');
+      if (el) {
+        el.innerText = 'Доступ отклонён покупателем.';
+      }
     }
     </script>
 </body>
